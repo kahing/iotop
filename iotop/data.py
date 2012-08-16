@@ -277,23 +277,30 @@ class ProcessInfo(DumpableObject):
                 self.user = str(uid)
         return self.user or '{none}'
 
-    def get_proc_status_name(self):
+    def parse_status(self):
         try:
-            first_line = open('/proc/%d/status' % self.pid).readline()
+            h = open('/proc/%d/status' % self.pid)
+            ret = {}
+            while True:
+                line = h.readline()
+                if not line:
+                    break
+                (key, value) = line.split(':', 1)
+                ret[key] = value.strip()
+            return ret
         except IOError:
-            return '{no such process}'
-        prefix = 'Name:\t'
-        if first_line.startswith(prefix):
-            name = first_line[6:].strip()
-        else:
-            name = ''
-        if name:
-            name = '[%s]' % name
-        else:
-            name = '{no name}'
-        return name
+            return None
 
     def get_cmdline(self):
+        status = self.parse_status()
+        if not status:
+            return '{no such process}'
+
+        if status['Tgid'] != status['Pid']:
+            # this is not the main thread, it maybe more helpful to
+            # show the thread name instead
+            return status['Name'] + ' (T)'
+
         # A process may exec, so we must always reread its cmdline
         try:
             proc_cmdline = open('/proc/%d/cmdline' % self.pid)
@@ -302,7 +309,7 @@ class ProcessInfo(DumpableObject):
             return '{no such process}'
         if not cmdline:
             # Probably a kernel thread, get its name from /proc/PID/status
-            return self.get_proc_status_name()
+            return '[%s]' % status['Name']
         parts = cmdline.split('\0')
         if parts[0].startswith('/'):
             first_command_char = parts[0].rfind('/') + 1
